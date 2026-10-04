@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# PyInstaller 打包产物
+build/
+dist/
+*.spec
+
+# 运行时生成
+logs/
+输出/
+templates/*
+!templates/template1.json
+
+# 本地业务数据（切勿提交真实发票/台账）
+填表模板.xlsx
+2026年开具发票统计.xlsx
+*.pdf
+*.png
+!docs/*.png
+
+# IDE / 系统
+.idea/
+.vscode/
+Thumbs.db
+Desktop.ini

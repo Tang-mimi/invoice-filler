@@ -1,0 +1,8 @@
+# 发票填表工具依赖
+# 安装: pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+pymupdf>=1.24          # PDF 文字层提取 + 页面渲染（供 OCR 兜底）
+rapidocr-onnxruntime>=1.3,<2   # 本地离线 OCR（免密钥，PaddleOCR 模型）
+numpy
+pillow
+openpyxl>=3.1          # Excel 读写，保留模板样式
+tkinterdnd2>=0.4       # 窗口拖拽导入文件/文件夹（可选，未安装则用按钮导入）
