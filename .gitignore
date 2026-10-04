@@ -17,8 +17,8 @@ templates/*
 !templates/template1.json
 
 # 本地业务数据（切勿提交真实发票/台账）
-填表模板.xlsx
-2026年开具发票统计.xlsx
+/填表模板.xlsx
+/2026年开具发票统计.xlsx
 *.pdf
 *.png
 !docs/*.png
