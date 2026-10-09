@@ -104,12 +104,22 @@ def make_invoice_pdf(path: str, number: str, items: list) -> None:
 
 # ---------------- 各项测试 ----------------
 def _template_xlsx() -> str:
-    """优先用本地真实模板，开源发布环境回退到示例模板。"""
-    for rel in ("填表模板.xlsx", os.path.join("示例模板", "填表模板.xlsx")):
+    """按优先级找一个可用的模板原件。
+
+    本地交付版把模板原件放在项目根目录（`填表模板.xlsx`）；
+    开源仓库版放在示例目录下。示例目录历史上叫过「示例模板/」，
+    现在是 `samples/template/`——两个名字都认，避免改名后自检找不到文件。
+    """
+    rels = [
+        "填表模板.xlsx",
+        os.path.join("samples", "template", "填表模板.xlsx"),
+        os.path.join("示例模板", "填表模板.xlsx"),
+    ]
+    for rel in rels:
         p = os.path.join(BASE, rel)
         if os.path.exists(p):
             return p
-    raise FileNotFoundError("未找到 填表模板.xlsx 或 示例模板/填表模板.xlsx")
+    raise FileNotFoundError("未找到模板原件，已找过：" + " / ".join(rels))
 
 
 def test_template_matching():
@@ -148,6 +158,53 @@ def test_parser_direct(pdfs):
         assert rec.get_field("seller_account") == "3204215501201000516181"
         assert len(rec.items) == len(items), rec.items
         assert rec.items[0].name == "*非金属矿物制品*纤维增强树脂切割片"
+
+
+def check_mapping_editor(app):
+    """回归：导入新模板的映射窗口必须构建完整，「保存为新模板」按钮必须真实可见可点。
+
+    旧版崩在这一行：canvas.tag_bind("body", "<Configure>", ...) —— Canvas 只接受
+    键鼠类事件，绑 <Configure> 会抛 TclError，窗口只建到一半就中断，下拉映射框和
+    保存按钮压根没被创建。exe 是 --windowed（无控制台），异常被吞得干干净净，
+    用户只看到一个"没有保存入口"的空窗口。新增本用例是为了让它再也藏不住。
+    """
+    import ui.app as appmod
+    from invoice_filler import paths
+    from invoice_filler.template import build_template_from_workbook, load_templates
+
+    tmp = tempfile.mkdtemp(prefix="tpl_editor_")
+    real_dir = paths.templates_dir
+    real_ask = appmod.simpledialog.askstring
+    real_info = appmod.messagebox.showinfo
+    real_err = appmod.messagebox.showerror
+    paths.templates_dir = lambda: tmp            # 别污染真实模板目录
+    try:
+        tpl = build_template_from_workbook(_template_xlsx(), name="回归-导入模板")
+        ed = appmod.MappingEditor(app, tpl)      # 旧版在这里抛 TclError
+        for _ in range(30):
+            app.update()
+        assert len(ed.choices) == len(tpl.columns), (len(ed.choices), len(tpl.columns))
+        btns = [b for f in ed.winfo_children() for b in f.winfo_children()
+                if b.winfo_class() == "TButton"]
+        save_btn = [b for b in btns if "保存" in b.cget("text")]
+        assert save_btn, f"没有找到保存按钮：{[b.cget('text') for b in btns]}"
+        assert save_btn[0].winfo_ismapped() and save_btn[0].winfo_height() > 1, \
+            "「保存为新模板」按钮不可见（布局被挤没了）"
+        appmod.simpledialog.askstring = lambda *a, **k: "回归-导入模板"
+        appmod.messagebox.showinfo = lambda *a, **k: None
+        appmod.messagebox.showerror = lambda *a, **k: None
+        ed._save()
+        assert ed.saved, "保存未生效（saved 仍为 False）"
+        names = [t.name for t in load_templates()]
+        assert "回归-导入模板" in names, f"保存后重新加载不到新模板：{names}"
+        print(f"  [模板导入] OK（{len(ed.choices)} 个映射框 / 保存按钮可见 / 落盘并重新加载成功）",
+              flush=True)
+    finally:
+        paths.templates_dir = real_dir
+        appmod.simpledialog.askstring = real_ask
+        appmod.messagebox.showinfo = real_info
+        appmod.messagebox.showerror = real_err
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 def test_app_flow(pdf1, pdf2):
@@ -222,15 +279,23 @@ def test_app_flow(pdf1, pdf2):
         app.records[0].set_field("buyer_name", "")
         assert app.records[0].get_field("buyer_name") == BUYER1
 
-        # 导出
-        out = os.path.join(BASE, "输出", "_smoke_gui.xlsx") if os.path.isdir(
-            os.path.join(BASE, "输出")) else os.path.join(tmpd, "_smoke_gui.xlsx")
+        # 导出（输出目录：本地叫 output_示例输出/，仓库新版 samples/output/，旧版 输出/）
+        out_candidates = ("output_示例输出", os.path.join("samples", "output"), "输出")
+        out_dir = next((os.path.join(BASE, n) for n in out_candidates
+                        if os.path.isdir(os.path.join(BASE, n))), "")
+        if out_dir:
+            os.makedirs(out_dir, exist_ok=True)
+        out = (os.path.join(out_dir, "_smoke_gui.xlsx") if out_dir
+               else os.path.join(tmpd, "_smoke_gui.xlsx"))
         from invoice_filler.exporter import export
         stats = export(list(app.records.values()), app.current_template, out)
         assert stats["total"] == 2
         if os.path.exists(out):
             os.remove(out)
         print("  导出 OK", flush=True)
+
+        # 模板导入/保存（复用同一个 Tk 实例，避免多根窗口收尾竞争）
+        check_mapping_editor(app)
     finally:
         shutil.rmtree(tmpd, ignore_errors=True)
         try:

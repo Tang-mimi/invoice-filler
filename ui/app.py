@@ -13,7 +13,7 @@ import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
-from invoice_filler import paths
+from invoice_filler import __version__, paths
 from invoice_filler.exporter import export
 from invoice_filler.fields import ALL_FIELDS
 from invoice_filler.models import STATUS_TEXT, InvoiceData
@@ -95,9 +95,16 @@ class TemplateManager(tk.Toplevel):
         self.transient(app)
         frm = ttk.Frame(self, padding=10)
         frm.pack(fill="both", expand=True)
-        ttk.Label(frm, text="已有模板（映射保存在 templates/*.json，可随程序复制分享）：").pack(anchor="w")
+        ttk.Label(frm, text="已有模板（每个模板是一份 *.json，保存在下面这个目录里，可随程序一起复制分享）：").pack(anchor="w")
+        loc = ttk.Frame(frm)
+        loc.pack(fill="x", pady=(2, 6))
+        ttk.Label(loc, text=paths.templates_dir(), foreground="#555555").pack(side="left")
+        ttk.Button(loc, text="打开该文件夹", command=self.open_templates_dir).pack(side="right")
         self.listbox = tk.Listbox(frm, height=10)
-        self.listbox.pack(fill="both", expand=True, pady=6)
+        self.listbox.pack(fill="both", expand=True, pady=(0, 6))
+        self.detail_var = tk.StringVar(value="")
+        ttk.Label(frm, textvariable=self.detail_var, foreground="#555555",
+                  wraplength=480, justify="left").pack(anchor="w", pady=(0, 4))
         self.reload_list()
         btns = ttk.Frame(frm)
         btns.pack(fill="x")
@@ -106,13 +113,39 @@ class TemplateManager(tk.Toplevel):
         ttk.Button(btns, text="删除", command=self.delete_selected).pack(side="left", padx=2)
         ttk.Button(btns, text="关闭", command=self.destroy).pack(side="right", padx=2)
         self.listbox.bind("<Double-Button-1>", lambda e: self.use_selected())
+        self.listbox.bind("<<ListboxSelect>>", self._on_select)
+
+    def open_templates_dir(self):
+        d = paths.templates_dir()
+        try:
+            os.makedirs(d, exist_ok=True)
+            os.startfile(d)  # noqa: S606
+        except OSError as e:
+            messagebox.showerror("无法打开文件夹", f"{d}\n\n{e}", parent=self)
+
+    def _on_select(self, _e=None):
+        sel = self.listbox.curselection()
+        if not sel or sel[0] >= len(self.app.templates):
+            self.detail_var.set("")
+            return
+        t = self.app.templates[sel[0]]
+        src = t.source_file or "（无）"
+        if src and src != "（无）":
+            resolved = paths.resolve_template_source(src)
+            src = resolved or f"{src}  ← 已失效，导出将按配置重建表格"
+        self.detail_var.set(f"模板来源文件：{src}")
 
     def reload_list(self):
         self.app.reload_templates()
         self.listbox.delete(0, "end")
         for t in self.app.templates:
-            mark = "（当前）" if t.id == self.app.current_template.id else ""
+            cur = self.app.current_template.id if self.app.current_template else None
+            mark = "（当前）" if t.id == cur else ""
             self.listbox.insert("end", f"{t.name}  [{t.id}]  {len(t.columns)}列 {mark}")
+        if self.app.templates:
+            self.listbox.selection_clear(0, "end")
+            self.listbox.selection_set(0)
+            self._on_select()
 
     def _selected(self) -> TemplateConfig | None:
         sel = self.listbox.curselection()
@@ -163,7 +196,12 @@ class TemplateManager(tk.Toplevel):
         except Exception as e:  # noqa: BLE001
             messagebox.showerror("导入失败", f"读取模板失败：{e}", parent=self)
             return
-        editor = MappingEditor(self, tpl)
+        try:
+            editor = MappingEditor(self, tpl)
+        except Exception as e:  # noqa: BLE001 - 构建失败不能留下半成品窗口
+            messagebox.showerror("导入失败", f"无法打开映射确认窗口：\n{type(e).__name__}: {e}",
+                                 parent=self)
+            return
         self.wait_window(editor)
         if editor.saved:
             self.reload_list()
@@ -208,23 +246,36 @@ class MappingEditor(tk.Toplevel):
         self.saved = False
         self.title(f"确认映射 - {template.name}")
         self.geometry("760x520")
+        self.minsize(640, 420)
         self.transient(parent)
         self.grab_set()
 
         q = match_quality(template)
         top = ttk.Frame(self, padding=(10, 8))
-        top.pack(fill="x")
+        top.pack(fill="x", side="top")
         ttk.Label(top, text=(f"表头共 {q['total']} 列：自动匹配 {q['mapped']} 列，"
                              f"{q['unmapped']} 列无匹配（默认留白）。"
                              "可在下方下拉框人工调整，调整后请保存。")).pack(anchor="w")
+        ttk.Label(top, text=f"保存位置：{paths.templates_dir()}",
+                  foreground="#555555").pack(anchor="w", pady=(2, 0))
 
-        canvas = tk.Canvas(self, highlightthickness=0)
-        sb = ttk.Scrollbar(self, orient="vertical", command=canvas.yview)
+        # 按钮栏必须"先"占位（side="bottom"），否则会被下面撑满的 canvas 挤成一条缝
+        btns = ttk.Frame(self, padding=(10, 8))
+        btns.pack(side="bottom", fill="x")
+        ttk.Button(btns, text="保存为新模板", command=self._save).pack(side="right", padx=4)
+        ttk.Button(btns, text="取消", command=self.destroy).pack(side="right")
+
+        mid = ttk.Frame(self)
+        mid.pack(fill="both", expand=True, side="top")
+        canvas = tk.Canvas(mid, highlightthickness=0)
+        sb = ttk.Scrollbar(mid, orient="vertical", command=canvas.yview)
         body = ttk.Frame(canvas, padding=(10, 4))
         body.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
         canvas.create_window((0, 0), window=body, anchor="nw", tags="body")
-        canvas.tag_bind("body", "<Configure>",
-                        lambda e: canvas.itemconfigure("body", width=canvas.winfo_width()))
+        # 内层 frame 宽度跟随画布。注意：Canvas.tag_bind 只接受键鼠类事件，
+        # 绑 <Configure> 会抛 TclError —— 旧版正崩在这里，导致窗口只建了一半，
+        # 下拉映射框和「保存为新模板」按钮压根没被创建出来。必须绑在画布控件本身。
+        canvas.bind("<Configure>", lambda e: canvas.itemconfigure("body", width=e.width))
         canvas.configure(yscrollcommand=sb.set)
         canvas.pack(side="left", fill="both", expand=True)
         sb.pack(side="right", fill="y")
@@ -249,11 +300,6 @@ class MappingEditor(tk.Toplevel):
             self.choices.append((col, cb))
         body.columnconfigure(0, weight=1)
 
-        btns = ttk.Frame(self, padding=10)
-        btns.pack(fill="x")
-        ttk.Button(btns, text="保存为新模板", command=self._save).pack(side="right", padx=4)
-        ttk.Button(btns, text="取消", command=self.destroy).pack(side="right")
-
     def _save(self):
         name = simpledialog.askstring("模板名称", "给新模板起个名字：",
                                       initialvalue=self.template.name, parent=self)
@@ -267,19 +313,39 @@ class MappingEditor(tk.Toplevel):
             col.field = label_to_key.get(cb.get())
             f = ALL_FIELDS.get(col.field) if col.field else None
             col.note = f["source"] if f else "发票中无对应字段，留白"
-        path = self.template.save()
+        try:
+            path = self.template.save()
+        except OSError as e:
+            messagebox.showerror(
+                "保存失败",
+                f"无法写入模板目录：\n{paths.templates_dir()}\n\n{e}\n\n"
+                "请确认该目录可写，或换到有写权限的位置运行程序。", parent=self)
+            return
+        # 立刻回读一次，确保"保存了"不是错觉——下次启动真的能加载出来
+        try:
+            ok = TemplateConfig.load(path).id == self.template.id
+        except Exception:  # noqa: BLE001
+            ok = False
+        if not ok:
+            messagebox.showerror(
+                "保存失败", f"模板已写入但无法回读，请检查目录权限：\n{path}", parent=self)
+            return
         self.saved = True
         q = match_quality(self.template)
-        messagebox.showinfo("已保存",
-                            f"模板已保存：{path}\n已映射 {q['mapped']} 列，留白 {q['unmapped']} 列。",
-                            parent=self)
+        messagebox.showinfo(
+            "模板已保存",
+            f"模板「{name}」已保存，关闭程序后依然保留。\n\n"
+            f"存储位置：\n{path}\n\n"
+            f"它已出现在「模板」下拉框和模板管理列表里，可直接切换使用。\n"
+            f"已映射 {q['mapped']} 列，留白 {q['unmapped']} 列。",
+            parent=self)
         self.destroy()
 
 
 class InvoiceFillerApp(BaseTk):
     def __init__(self):
         super().__init__()
-        self.title("发票填表工具")
+        self.title(f"发票填表工具 v{__version__}")
         self.geometry("1180x720")
         self.minsize(900, 560)
         self.option_add("*Font", ("Microsoft YaHei UI", 10))
@@ -442,7 +508,7 @@ class InvoiceFillerApp(BaseTk):
     def _dnd_log(self, msg: str):
         """拖放链路日志，便于排查"拖了没反应"类问题。"""
         try:
-            d = os.path.join(paths.app_base_dir(), "logs")
+            d = paths.logs_dir()
             os.makedirs(d, exist_ok=True)
             with open(os.path.join(d, "dnd.log"), "a", encoding="utf-8") as f:
                 import datetime

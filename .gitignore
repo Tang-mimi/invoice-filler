@@ -5,21 +5,33 @@ __pycache__/
 .venv/
 venv/
 
-# PyInstaller 打包产物
+# PyInstaller 打包产物（自动生成的 .spec 不入库；项目自带的那份打包配置除外，见下）
 build/
 dist/
 *.spec
+!发票填表工具.spec
 
 # 运行时生成
+# 注：程序为了兼容两种目录结构，本地版用「英文_中文备注」名、仓库版用纯英文名，
+# 两种名字都要挡住，否则换个环境就会把运行日志误提交上去。
 logs/
+logs_运行日志/
 输出/
+output_示例输出/
+build_构建缓存/
+dist_安装包/
 templates/*
+templates_模板配置/*
 !templates/template1.json
+!templates_模板配置/template1.json
 
 # 本地业务数据（切勿提交真实发票/台账）
 /填表模板.xlsx
 /2026年开具发票统计.xlsx
 *.pdf
+# 注：samples/ 下的示例 xlsx 用于演示，予以保留；图片只放行 docs/
+!samples/**/*.xlsx
+!samples/**/*.md
 *.png
 !docs/*.png
 

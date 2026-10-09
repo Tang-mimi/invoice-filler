@@ -13,6 +13,7 @@ from openpyxl.comments import Comment
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import column_index_from_string
 
+from . import paths
 from .fields import ALL_FIELDS, NUMBER_FORMATS
 from .models import STATUS_TEXT, InvoiceData
 from .template import TemplateConfig
@@ -92,8 +93,10 @@ def build_workbook_from_template(template: TemplateConfig) -> "openpyxl.Workbook
 
 
 def export(records: List[InvoiceData], template: TemplateConfig, out_path: str) -> dict:
-    src = template.source_file
-    if src and os.path.exists(src):
+    # 模板来源可能是绝对路径（用户自己导入）或相对程序目录的路径（随程序分发的内置模板）。
+    # 解析不到时才退回"按模板配置重建"，避免换机后静默丢样式。
+    src = paths.resolve_template_source(template.source_file)
+    if src:
         wb = openpyxl.load_workbook(src)
     else:
         wb = build_workbook_from_template(template)

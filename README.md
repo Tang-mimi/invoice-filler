@@ -45,9 +45,21 @@ python tools/cli_check.py 发票1.pdf 发票2.png --out 填表结果.xlsx
 双击 打包exe.bat
 ```
 
-产物 `dist\发票填表工具.exe` 为单文件、免安装，可直接发给其他 Windows 电脑使用
-（目标机器无需安装 Python 或任何依赖）。注意：首次运行如有 SmartScreen 提示，
-选"更多信息 → 仍要运行"；exe 请放在可写目录；不要以管理员身份运行（会禁用拖放）。
+产物 `dist_安装包\发票填表工具-v1.0.2.exe` 为单文件、免安装，可直接发给其他 Windows 电脑使用
+（目标机器无需安装 Python 或任何依赖）。
+
+版本号只在 `invoice_filler/__init__.py` 的 `__version__` 维护一处，
+打包脚本（`打包exe.bat` → `发票填表工具.spec`）会自动把它写进产物文件名与 exe 文件属性。
+
+注意：首次运行如有 SmartScreen 提示，选"更多信息 → 仍要运行"；
+exe 请放在**可写目录**（桌面、D 盘等；Program Files 会写不进模板/日志目录）；
+不要以管理员身份运行（会禁用拖放）。
+
+**换机不丢模板样式**：程序内置了一份模板原件，首次运行会在 exe 旁释放
+`填表模板.xlsx`、`templates/template1.json`、`logs/`。
+模板 JSON 里的来源路径支持**绝对路径**（你自己导入的台账）和**相对程序目录的路径**
+（随程序分发的内置模板），所以同一份配置换到别的电脑依然能定位到模板原件，
+导出时的表头样式与工作表结构不会丢失。
 
 ## 模板机制（可扩展）
 
@@ -70,18 +82,28 @@ python tools/cli_check.py 发票1.pdf 发票2.png --out 填表结果.xlsx
 
 ```
 main.py                  程序入口（依赖缺失时弹窗提示）
+requirements.txt         依赖清单
+发票填表工具.spec          打包配置（版本号也在这里注入）
+启动.bat / 打包exe.bat     两个入口（双击运行 / 双击打包）
+
 ui/app.py                桌面界面（tkinter，拖拽导入 / 预览 / 修正 / 模板管理）
-invoice_filler/
+invoice_filler/          核心逻辑
   fields.py              规范字段注册表 + 表头别名自动匹配
   reader.py              PDF 文字层 / OCR 词块读取（中文路径安全）
   parser.py              数电票解析器（行聚合 + 锚点定位，兼容 OCR 粘连词块）
   template.py            模板 JSON 加载/保存/从 xlsx 自动生成映射
   exporter.py            Excel 导出（保留模板样式 + 处理报告 + 防覆盖）
   report.py              字段映射说明生成
-templates/               模板配置（运行时生成，template1 内置种子在 invoice_filler/）
+  paths.py               程序目录 / 模板目录 / 日志目录的跨环境解析
+  builtin_template1.json 内置模板1 配置（首次运行释放到 templates/）
+  builtin_template.xlsx  内置模板原件（首次运行释放到程序目录，导出时沿用其版面）
+
+templates/               模板配置（运行时生成，template1 为内置种子）
 tools/cli_check.py       命令行批处理
 tools/smoke_test.py      自检脚本（自生成合成发票，可复现示例输出）
-示例模板/  示例输出/       由 tools/smoke_test.py 的合成发票生成的可复现示例
+tools/sync_to_repo.py    本地交付版 → 本仓库的同步脚本（含目录名映射）
+samples/template/        示例模板（由自检脚本的合成发票生成）
+samples/output/          示例输出（同上，可复现）
 ```
 
 自检（需先装好依赖）：
